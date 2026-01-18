@@ -1,0 +1,180 @@
+--// PRO MOBILE + PC HUB (WITH ANIMATION + RTX)
+local Players = game:GetService("Players")
+local UIS = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+local Lighting = game:GetService("Lighting")
+local RunService = game:GetService("RunService")
+
+local Player = Players.LocalPlayer
+
+-- GUI
+local gui = Instance.new("ScreenGui")
+gui.Name = "ProHubAllInOne"
+gui.ResetOnSpawn = false
+gui.Parent = Player:WaitForChild("PlayerGui")
+
+-- MAIN FRAME
+local main = Instance.new("Frame")
+main.Size = UDim2.new(0, 320, 0, 230)
+main.Position = UDim2.new(0.5, 0, 0.5, 0)
+main.AnchorPoint = Vector2.new(0.5, 0.5)
+main.BackgroundColor3 = Color3.fromRGB(20,20,20)
+main.BorderSizePixel = 0
+main.Parent = gui
+
+Instance.new("UICorner", main).CornerRadius = UDim.new(0,12)
+
+-- TITLE
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1,0,0,40)
+title.BackgroundTransparency = 1
+title.Text = "🔥 PRO HUB 🔥"
+title.TextColor3 = Color3.new(1,1,1)
+title.Font = Enum.Font.GothamBold
+title.TextSize = 20
+title.Parent = main
+
+-- DRAG MAIN
+do
+	local dragging, dragStart, startPos
+	main.InputBegan:Connect(function(i)
+		if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+			dragging = true; dragStart = i.Position; startPos = main.Position
+		end
+	end)
+	main.InputEnded:Connect(function(i)
+		if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+			dragging = false
+		end
+	end)
+	UIS.InputChanged:Connect(function(i)
+		if dragging and (i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch) then
+			local d = i.Position - dragStart
+			main.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + d.X, startPos.Y.Scale, startPos.Y.Offset + d.Y)
+		end
+	end)
+end
+
+-- FLOATING BUTTON
+local floatBtn = Instance.new("TextButton")
+floatBtn.Size = UDim2.new(0,55,0,55)
+floatBtn.Position = UDim2.new(0,20,0.5,-27)
+floatBtn.BackgroundColor3 = Color3.fromRGB(255,70,70)
+floatBtn.Text = "☰"
+floatBtn.TextSize = 26
+floatBtn.Font = Enum.Font.GothamBold
+floatBtn.TextColor3 = Color3.new(1,1,1)
+floatBtn.Parent = gui
+Instance.new("UICorner", floatBtn).CornerRadius = UDim.new(1,0)
+
+-- DRAG FLOAT BTN
+do
+	local dragging, dragStart, startPos
+	floatBtn.InputBegan:Connect(function(i)
+		if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+			dragging = true; dragStart = i.Position; startPos = floatBtn.Position
+		end
+	end)
+	floatBtn.InputEnded:Connect(function(i)
+		if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+			dragging = false
+		end
+	end)
+	UIS.InputChanged:Connect(function(i)
+		if dragging and (i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch) then
+			local d = i.Position - dragStart
+			floatBtn.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + d.X, startPos.Y.Scale, startPos.Y.Offset + d.Y)
+		end
+	end)
+end
+
+-- OPEN/CLOSE ANIMATION
+local open = true
+local openSize = main.Size
+local closeSize = UDim2.new(0,0,0,0)
+local tweenIn = TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+local tweenOut = TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+
+local function toggleMenu()
+	if open then
+		local t = TweenService:Create(main, tweenOut, {Size = closeSize, BackgroundTransparency = 1})
+		t:Play(); t.Completed:Wait()
+		main.Visible = false
+	else
+		main.Visible = true
+		main.Size = closeSize
+		main.BackgroundTransparency = 1
+		TweenService:Create(main, tweenIn, {Size = openSize, BackgroundTransparency = 0}):Play()
+	end
+	open = not open
+end
+
+floatBtn.MouseButton1Click:Connect(toggleMenu)
+UIS.InputBegan:Connect(function(i,gp)
+	if gp then return end
+	if i.KeyCode == Enum.KeyCode.RightShift then toggleMenu() end
+end)
+
+-- ================= RTX VISUAL =================
+local cc = Instance.new("ColorCorrectionEffect", Lighting)
+cc.Brightness = 0.05; cc.Contrast = 0.25; cc.Saturation = -0.05
+cc.TintColor = Color3.fromRGB(235,235,255); cc.Enabled = false
+
+local bloom = Instance.new("BloomEffect", Lighting)
+bloom.Intensity = 1.2; bloom.Size = 56; bloom.Threshold = 1; bloom.Enabled = false
+
+local rays = Instance.new("SunRaysEffect", Lighting)
+rays.Intensity = 0.15; rays.Spread = 0.8; rays.Enabled = false
+
+local dof = Instance.new("DepthOfFieldEffect", Lighting)
+dof.FarIntensity = 0.15; dof.NearIntensity = 0
+dof.FocusDistance = 80; dof.InFocusRadius = 40; dof.Enabled = false
+
+local atmosphere = Instance.new("Atmosphere", Lighting)
+atmosphere.Density = 0.25; atmosphere.Offset = 0.1
+atmosphere.Color = Color3.fromRGB(200,200,220)
+atmosphere.Decay = Color3.fromRGB(90,90,110)
+atmosphere.Enabled = false
+
+local rtxOn = false
+local reflectConn
+
+local function setRTX(state)
+	cc.Enabled = state; bloom.Enabled = state; rays.Enabled = state
+	dof.Enabled = state; atmosphere.Enabled = state
+end
+
+local function setReflection(state)
+	if reflectConn then reflectConn:Disconnect(); reflectConn = nil end
+	if not state then return end
+	reflectConn = RunService.RenderStepped:Connect(function()
+		for _,v in ipairs(workspace:GetDescendants()) do
+			if v:IsA("BasePart") and v.Material ~= Enum.Material.Glass then
+				if v.Name:lower():find("floor") or v.Size.Y < 1.2 then
+					v.Material = Enum.Material.SmoothPlastic
+					v.Reflectance = 0.25
+				end
+			end
+		end
+	end)
+end
+
+-- RTX BUTTON
+local rtxBtn = Instance.new("TextButton")
+rtxBtn.Size = UDim2.new(0, 140, 0, 36)
+rtxBtn.Position = UDim2.new(0.5, -70, 0, 110)
+rtxBtn.BackgroundColor3 = Color3.fromRGB(40,40,40)
+rtxBtn.Text = "RTX : OFF"
+rtxBtn.TextColor3 = Color3.new(1,1,1)
+rtxBtn.Font = Enum.Font.GothamBold
+rtxBtn.TextSize = 14
+rtxBtn.Parent = main
+Instance.new("UICorner", rtxBtn).CornerRadius = UDim.new(0,8)
+
+rtxBtn.MouseButton1Click:Connect(function()
+	rtxOn = not rtxOn
+	setRTX(rtxOn)
+	setReflection(rtxOn)
+	rtxBtn.Text = rtxOn and "RTX : ON" or "RTX : OFF"
+	rtxBtn.BackgroundColor3 = rtxOn and Color3.fromRGB(80,120,255) or Color3.fromRGB(40,40,40)
+end)
