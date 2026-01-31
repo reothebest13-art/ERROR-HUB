@@ -1,17 +1,35 @@
-
+-- ================= SERVICES =================
 local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
 
 local lp = Players.LocalPlayer
-local SPEED = 250
+local SPEED = 320
 
+-- ================= GET GAP PART =================
+local function getGapPart(gap)
+	if not gap then return nil end
+	if gap.Name == "Gap6" then
+		local mud = gap:FindFirstChild("Mud")
+		if mud and mud:IsA("BasePart") then
+			return mud
+		end
+	end
+
+	local children = gap:GetChildren()
+	if children[2] and children[2]:IsA("BasePart") then
+		return children[2]
+	end
+
+	return nil
+end
+
+-- ================= FIND CURRENT / NEXT / PREV GAP =================
 local function getCurrentNextPrevGap()
 	local char = lp.Character or lp.CharacterAdded:Wait()
 	local hrp = char:WaitForChild("HumanoidRootPart")
 
-	local gapsFolder = workspace:FindFirstChild("Misc")
-		and workspace.Misc:FindFirstChild("Gaps")
+	local gapsFolder = workspace.Misc and workspace.Misc:FindFirstChild("Gaps")
 	if not gapsFolder then return end
 
 	local nearestIndex
@@ -19,13 +37,12 @@ local function getCurrentNextPrevGap()
 
 	for _, gap in ipairs(gapsFolder:GetChildren()) do
 		if gap:IsA("Model") then
-			local part = gap:GetChildren()[2]
-			local index = tonumber(gap.Name:match("%d+"))
-			if part and index then
+			local part = getGapPart(gap)
+			if part then
 				local dist = (part.Position - hrp.Position).Magnitude
 				if dist < nearestDist then
 					nearestDist = dist
-					nearestIndex = index
+					nearestIndex = tonumber(gap.Name:match("%d+"))
 				end
 			end
 		end
@@ -39,24 +56,28 @@ local function getCurrentNextPrevGap()
 		gapsFolder:FindFirstChild("Gap" .. (nearestIndex - 1))
 end
 
+-- ================= MOVE TO GAP =================
 local function moveToGap(gap)
 	if not gap then return end
 
 	local char = lp.Character or lp.CharacterAdded:Wait()
 	local hrp = char:WaitForChild("HumanoidRootPart")
 
-	local part = gap:GetChildren()[2]
-	if not part or not part:IsA("BasePart") then return end
+	local part = getGapPart(gap)
+	if not part then return end
 
 	local params = RaycastParams.new()
 	params.FilterDescendantsInstances = {char}
 	params.FilterType = Enum.RaycastFilterType.Blacklist
 
-	local rayOrigin = part.Position + Vector3.new(0, 10, 0)
-	local rayDir = Vector3.new(0, -80, 0)
+	local result = workspace:Raycast(
+		part.Position + Vector3.new(0, 10, 0),
+		Vector3.new(0, -60, 0),
+		params
+	)
 
-	local result = workspace:Raycast(rayOrigin, rayDir, params)
-	local targetPos = (result and result.Position or part.Position) + Vector3.new(0, 2, 0)
+	local targetPos = result and (result.Position + Vector3.new(0, 2.5, 0))
+		or (part.Position + Vector3.new(0, 2.5, 0))
 
 	local dist = (hrp.Position - targetPos).Magnitude
 	local t = dist / SPEED
@@ -68,68 +89,48 @@ local function moveToGap(gap)
 	):Play()
 end
 
-local gui = Instance.new("ScreenGui", lp.PlayerGui)
+-- ================= UI =================
+local gui = Instance.new("ScreenGui")
+gui.Name = "GapUI"
 gui.ResetOnSpawn = false
+gui.Parent = lp:WaitForChild("PlayerGui")
 
 local frame = Instance.new("Frame", gui)
 frame.Size = UDim2.fromOffset(220, 140)
 frame.Position = UDim2.fromScale(0.02, 0.4)
-frame.BackgroundColor3 = Color3.fromRGB(70, 160, 255) -- ฟ้า
+frame.BackgroundColor3 = Color3.fromRGB(70, 150, 255) -- ฟ้า
 frame.BorderSizePixel = 0
 Instance.new("UICorner", frame).CornerRadius = UDim.new(0,12)
 
-local title = Instance.new("TextLabel", frame)
-title.Size = UDim2.new(1,0,0,32)
-title.BackgroundTransparency = 1
-title.Text = "RICK HUB"
-title.TextColor3 = Color3.new(1,1,1)
-title.Font = Enum.Font.GothamBold
-title.TextSize = 15
+-- ================= DRAG UI (ชัวร์) =================
+local dragging = false
+local dragStart
+local startPos
 
-local function makeBtn(text, y, callback)
-	local b = Instance.new("TextButton", frame)
-	b.Size = UDim2.new(0.9,0,0,35)
-	b.Position = UDim2.new(0.05,0,y,0)
-	b.BackgroundColor3 = Color3.fromRGB(255, 220, 90) -- เหลือง
-	b.Text = text
-	b.TextColor3 = Color3.fromRGB(30,30,30)
-	b.Font = Enum.Font.GothamBold
-	b.TextSize = 14
-	b.BorderSizePixel = 0
-	Instance.new("UICorner", b).CornerRadius = UDim.new(0,8)
-	b.MouseButton1Click:Connect(callback)
+local function beginDrag(input)
+	dragging = true
+	dragStart = input.Position
+	startPos = frame.Position
+
+	input.Changed:Connect(function()
+		if input.UserInputState == Enum.UserInputState.End then
+			dragging = false
+		end
+	end)
 end
-
-makeBtn("⬆ Up (Next Gap)", 0.35, function()
-	local _, nextGap = getCurrentNextPrevGap()
-	moveToGap(nextGap)
-end)
-
-makeBtn("⬇ Down (Prev Gap)", 0.65, function()
-	local _, _, prevGap = getCurrentNextPrevGap()
-	moveToGap(prevGap)
-end)
-
-local dragging, dragStart, startPos
 
 frame.InputBegan:Connect(function(input)
 	if input.UserInputType == Enum.UserInputType.MouseButton1
 	or input.UserInputType == Enum.UserInputType.Touch then
-		dragging = true
-		dragStart = input.Position
-		startPos = frame.Position
-
-		input.Changed:Connect(function()
-			if input.UserInputState == Enum.UserInputState.End then
-				dragging = false
-			end
-		end)
+		beginDrag(input)
 	end
 end)
 
-frame.InputChanged:Connect(function(input)
-	if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement
-	or input.UserInputType == Enum.UserInputType.Touch) then
+UserInputService.InputChanged:Connect(function(input)
+	if dragging and (
+		input.UserInputType == Enum.UserInputType.MouseMovement
+		or input.UserInputType == Enum.UserInputType.Touch
+	) then
 		local delta = input.Position - dragStart
 		frame.Position = UDim2.new(
 			startPos.X.Scale,
@@ -138,4 +139,42 @@ frame.InputChanged:Connect(function(input)
 			startPos.Y.Offset + delta.Y
 		)
 	end
+end)
+
+-- ================= TITLE =================
+local title = Instance.new("TextLabel", frame)
+title.Size = UDim2.new(1,0,0,32)
+title.BackgroundTransparency = 1
+title.Text = "Gap Controller"
+title.TextColor3 = Color3.new(1,1,1)
+title.Font = Enum.Font.GothamBold
+title.TextSize = 15
+title.Active = true -- สำคัญมากสำหรับลาก
+title.InputBegan:Connect(beginDrag)
+
+-- ================= BUTTON =================
+local function makeBtn(text, pos, callback)
+	local b = Instance.new("TextButton", frame)
+	b.Size = UDim2.new(0.9,0,0,35)
+	b.Position = pos
+	b.BackgroundColor3 = Color3.fromRGB(255, 210, 80) -- เหลือง
+	b.Text = text
+	b.TextColor3 = Color3.fromRGB(40,40,40)
+	b.Font = Enum.Font.GothamBold
+	b.TextSize = 14
+	b.BorderSizePixel = 0
+	Instance.new("UICorner", b).CornerRadius = UDim.new(0,8)
+	b.MouseButton1Click:Connect(callback)
+end
+
+-- ⬆ Up
+makeBtn("⬆ Up (Next Gap)", UDim2.new(0.05,0,0.35,0), function()
+	local _, nextGap = getCurrentNextPrevGap()
+	moveToGap(nextGap)
+end)
+
+-- ⬇ Down
+makeBtn("⬇ Down (Prev Gap)", UDim2.new(0.05,0,0.65,0), function()
+	local _, _, prevGap = getCurrentNextPrevGap()
+	moveToGap(prevGap)
 end)
