@@ -854,7 +854,7 @@ end)
 -- ===== CONFIG =====
 local SPEED = 330
 local EVADE_DISTANCE = 160
-local EVADE_COOLDOWN = 1.2
+local EVADE_COOLDOWN = 0.01
 
 local FINAL_CFRAME = CFrame.new(
 	129.496, 3.180, 46.862,
