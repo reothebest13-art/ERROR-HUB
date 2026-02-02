@@ -830,18 +830,18 @@ local Workspace = game:GetService("Workspace")
 
 local lp = Players.LocalPlayer
 
--- ===== CHARACTER SAFE REFRESH =====
+-- ===== CHARACTER REFRESH (กันตายแล้วหยุด) =====
 local char, hrp, humanoid
 local currentTween
 
-local function bindCharacter(character)
+local function onCharacterAdded(character)
 	char = character
 	humanoid = char:WaitForChild("Humanoid")
 	hrp = char:WaitForChild("HumanoidRootPart")
 end
 
-bindCharacter(lp.Character or lp.CharacterAdded:Wait())
-lp.CharacterAdded:Connect(bindCharacter)
+onCharacterAdded(lp.Character or lp.CharacterAdded:Wait())
+lp.CharacterAdded:Connect(onCharacterAdded)
 
 lp.CharacterRemoving:Connect(function()
 	if currentTween then
@@ -877,7 +877,7 @@ local GAPS = {
 -- ===== STATE =====
 local busyEvade = false
 local AutoFarmEnabled = false
-local SelectedFolders = {}
+local SelectedFolders = {} -- เลือกจาก Dropdown
 
 -- ===== Utils =====
 local function getMaxCarry()
@@ -908,7 +908,7 @@ local function tweenTo(cf, dist)
 	currentTween:Play()
 end
 
--- ===== GAP BLOCK CHECK =====
+-- ===== GAP BLOCK CHECK (คลื่นบังทาง) =====
 local function isGapBlocked(gapPos)
 	local tsunamis = Workspace:FindFirstChild("ActiveTsunamis")
 	if not tsunamis or not hrp then return false end
@@ -962,29 +962,25 @@ local function checkHazard()
 	return false
 end
 
--- ===== Brainrot Finder (เลือกโฟลเดอร์) =====
+-- ===== Brainrot Finder (อินฟินิตี้ + เลือกโฟลเดอร์) =====
 local function getNearestRendered()
 	if not hrp then return end
 	local root = Workspace:FindFirstChild("ActiveBrainrots")
 	if not root then return end
 
 	local nearest, shortest = nil, math.huge
-
 	for folderName, enabled in pairs(SelectedFolders) do
 		if enabled then
 			local folder = root:FindFirstChild(folderName)
 			if folder then
-				local rendered = folder:FindFirstChild("RenderedBrainrot")
-				if rendered then
-					for _, model in ipairs(rendered:GetChildren()) do
-						if model:IsA("Model") then
-							local part = model:FindFirstChildWhichIsA("BasePart")
-							if part then
-								local d = (part.Position - hrp.Position).Magnitude
-								if d < shortest then
-									shortest = d
-									nearest = part
-								end
+				for _, model in ipairs(folder:GetChildren()) do
+					if model:IsA("Model") then
+						local part = model:FindFirstChildWhichIsA("BasePart")
+						if part then
+							local d = (part.Position - hrp.Position).Magnitude
+							if d < shortest then
+								shortest = d
+								nearest = part
 							end
 						end
 					end
@@ -1015,11 +1011,9 @@ local function autoFirePrompts()
 	end
 end
 
--- =====================================================
--- ===================== UI ============================
--- =====================================================
+-- ===== UI (Dropdown + Toggle) =====
+-- สมมติว่าคุณมี Tab จาก UI Library อยู่แล้ว
 
--- ดึงชื่อโฟลเดอร์ Brainrot
 local BrainrotValues = {}
 for _, folder in ipairs(Workspace:WaitForChild("ActiveBrainrots"):GetChildren()) do
 	if folder:IsA("Folder") then
@@ -1028,10 +1022,9 @@ for _, folder in ipairs(Workspace:WaitForChild("ActiveBrainrots"):GetChildren())
 	end
 end
 
--- Dropdown เลือก Brainrot
 WaveTab:Dropdown({
-	Title = "AutoFarm | Brainrots",
-	Desc = "Select Brainrot folders",
+	Title = "Select Brainrots Farm",
+	Desc = "Choose Brainrot folders",
 	Values = BrainrotValues,
 	Multi = true,
 	AllowNone = true,
@@ -1045,7 +1038,6 @@ WaveTab:Dropdown({
 	end
 })
 
--- Toggle AutoFarm
 WaveTab:Toggle({
 	Title = "AutoFarm",
 	Value = false,
@@ -1054,28 +1046,30 @@ WaveTab:Toggle({
 	end
 })
 
--- =====================================================
--- ================= MAIN LOOP =========================
--- =====================================================
+-- ===== MAIN LOOP (🔒 ต้องเปิด AutoFarm ก่อน ทุกอย่างถึงทำงาน) =====
 RunService.Heartbeat:Connect(function()
 	if not hrp or not hrp.Parent then return end
 
-	-- หลบมาก่อนเสมอ
-	if checkHazard() then return end
+	-- ❌ ปิด AutoFarm = หยุดทุกอย่าง (รวมหลบคลื่น)
+	if not AutoFarmEnabled then
+		return
+	end
 
-	if not AutoFarmEnabled then return end
-
-	-- เต็มแล้ว → กลับ FINAL
-	local maxCarry = getMaxCarry()
-	if maxCarry > 0 and countRendered() >= maxCarry then
-		if not busyEvade then
-			tweenTo(FINAL_CFRAME)
-		end
+	-- 🌊 หลบคลื่น
+	if checkHazard() then
 		autoFirePrompts()
 		return
 	end
 
-	-- หา Brainrot
+	-- 🎒 เต็มแล้วกลับ
+	local maxCarry = getMaxCarry()
+	if maxCarry > 0 and countRendered() >= maxCarry then
+		tweenTo(FINAL_CFRAME)
+		autoFirePrompts()
+		return
+	end
+
+	-- 🤖 ฟาร์ม Brainrot
 	local target, dist = getNearestRendered()
 	if target and not busyEvade then
 		tweenTo(target.CFrame, dist)
@@ -1083,6 +1077,8 @@ RunService.Heartbeat:Connect(function()
 
 	autoFirePrompts()
 end)
+
+
 WaveTab:Toggle({
 	Title = "Auto dodge Wave🌊",
 	Desc = "หนีคลื่นอัตโนมัติ",
