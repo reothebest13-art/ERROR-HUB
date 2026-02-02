@@ -852,8 +852,8 @@ lp.CharacterRemoving:Connect(function()
 end)
 
 -- ===== CONFIG =====
-local SPEED = 330
-local EVADE_DISTANCE = 160
+local SPEED = 320
+local EVADE_DISTANCE = 170
 local EVADE_COOLDOWN = 0.01
 
 local FINAL_CFRAME = CFrame.new(
@@ -1000,7 +1000,7 @@ local function autoFirePrompts()
 			local part = p.Parent
 			if part and part:IsA("BasePart") then
 				if (part.Position - hrp.Position).Magnitude <= p.MaxActivationDistance then
-					if not lastFire[p] or tick() - lastFire[p] > 0.2 then
+					if not lastFire[p] or tick() - lastFire[p] > 0.5 then
 						lastFire[p] = tick()
 						pcall(function()
 							fireproximityprompt(p)
@@ -1012,7 +1012,6 @@ local function autoFirePrompts()
 	end
 end
 
--- ===== UI (Dropdown + Toggle) =====
 local BrainrotValues = {}
 for _, folder in ipairs(Workspace:WaitForChild("ActiveBrainrots"):GetChildren()) do
 	if folder:IsA("Folder") then
@@ -1048,28 +1047,19 @@ WaveTab:Toggle({
 -- ===== MAIN LOOP =====
 RunService.Heartbeat:Connect(function()
 	if not hrp or not hrp.Parent then return end
-
-	-- 🔒 ต้องเปิดก่อน ทุกอย่างถึงทำ
 	if not AutoFarmEnabled then
 		return
 	end
-
-	-- 🌊 หลบคลื่น (ทำทุกเฟรม)
 	local evading = checkHazard()
-
-	-- 🔘 Prompt ทำได้เสมอ
 	autoFirePrompts()
 
 	if evading then return end
-
-	-- 🎒 ของเต็ม → กลับ FINAL
 	local maxCarry = getMaxCarry()
 	if maxCarry > 0 and countRendered() >= maxCarry then
 		tweenTo(FINAL_CFRAME)
 		return
 	end
 
-	-- 🤖 ฟาร์ม
 	local target, dist = getNearestRendered()
 	if target and not busyEvade then
 		tweenTo(target.CFrame, dist)
