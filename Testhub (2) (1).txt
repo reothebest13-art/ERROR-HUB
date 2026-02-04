@@ -832,25 +832,25 @@ local SellRemote =
     :WaitForChild("SellTool")
 
 -- ================== CONFIG ==================
-local SELL_DELAY = 0.01
-local AUTO_SELL = true
-local MIN_LEVEL = 1
-local SELL_CLASSES = {
+AUTO_SELL = true
+MIN_LEVEL = 1
+SELL_DELAY = 0.05
+
+SELL_CLASSES = {
     Common = true,
     Uncommon = true,
     Rare = true,
 }
 
--- ================== BLACKLIST FOLDER ==================
-local BlacklistFolder = workspace:FindFirstChild("BlacklistFolder")
+-- ================== BLACKLIST ==================
+BlacklistFolder = workspace:FindFirstChild("BlacklistFolder")
 if not BlacklistFolder then
     BlacklistFolder = Instance.new("Folder")
     BlacklistFolder.Name = "BlacklistFolder"
     BlacklistFolder.Parent = workspace
 end
 
--- ================== BLACKLIST CACHE ==================
-local Blacklist = {}
+Blacklist = {}
 
 local function rebuildBlacklist()
     table.clear(Blacklist)
@@ -864,25 +864,21 @@ BlacklistFolder.ChildAdded:Connect(rebuildBlacklist)
 BlacklistFolder.ChildRemoved:Connect(rebuildBlacklist)
 
 -- ================== DATA ==================
-local ToolData = {}
-local Queue = {}
-local Selling = false
+ToolData = {} -- [tool] = {Name, Level, Mutation, Class}
 
 -- ================== UTILS ==================
 local function getChar()
     return lp.Character or lp.CharacterAdded:Wait()
 end
 
-local function isRealRemoved(tool)
-    if tool:IsDescendantOf(lp.Backpack) then return false end
-    if lp.Character and tool:IsDescendantOf(lp.Character) then return false end
-    return true
+local function makeKey(data)
+    return string.format("[%s] %s [%d]", data.Mutation, data.Name, data.Level)
 end
 
--- ================== CLASS READER ==================
+-- ================== CLASS SCAN (ต้องถือ) ==================
 local function readClass(tool)
     local rm = tool:FindFirstChild("RenderModel")
-    if not rm then return end
+    if not rm then return nil end
 
     for _, model in ipairs(rm:GetChildren()) do
         local me = model:FindFirstChild("ModelExtents")
@@ -895,14 +891,15 @@ local function readClass(tool)
     end
 end
 
--- ================== SCAN ==================
+-- ================== SCAN TOOL ==================
 local function scanTool(tool)
     if not tool:IsA("Tool") then return end
     if ToolData[tool] then return end
 
-    local name = tool:GetAttribute("BrainrotName")
+    local name = tool:GetAttribute("BrainrotName") or tool.Name
     local level = tool:GetAttribute("Level")
     local mutation = tool:GetAttribute("Mutation") or "None"
+    if not level then return end
 
     tool.Parent = getChar()
     task.wait(SELL_DELAY)
@@ -912,41 +909,13 @@ local function scanTool(tool)
     if not class then return end
 
     ToolData[tool] = {
-        Name = name or tool.Name,
-        Level = level or 0,
+        Name = name,
+        Level = level,
         Mutation = mutation,
         Class = class
     }
-end
 
--- ================== SELL LOGIC ==================
-local function makeKey(data)
-    return string.format("[%s] %s [%d]", data.Mutation, data.Name, data.Level)
-end
-
-local function shouldSell(tool, data)
-    if not AUTO_SELL then return false end
-    if not SELL_CLASSES[data.Class] then return false end
-    if data.Level > MIN_LEVEL then return false end
-    if Blacklist[makeKey(data)] then return false end
-    return true
-end
-
-local function processQueue()
-    if Selling then return end
-    Selling = true
-
-    while #Queue > 0 do
-        local tool = table.remove(Queue, 1)
-        if tool and tool.Parent == lp.Backpack then
-            tool.Parent = getChar()
-            task.wait(SELL_DELAY)
-            SellRemote:InvokeServer()
-            task.wait(SELL_DELAY)
-        end
-    end
-
-    Selling = false
+    print("[SCAN]", name, class, "Lv", level)
 end
 
 -- ================== BACKPACK WATCH ==================
@@ -962,43 +931,25 @@ local function hookBackpack()
     end)
 
     backpack.ChildRemoved:Connect(function(tool)
-        task.wait()
-        if ToolData[tool] and isRealRemoved(tool) then
-            ToolData[tool] = nil
-        end
+        ToolData[tool] = nil
     end)
 end
 
--- ================== AUTO SELL LOOP ==================
-task.spawn(function()
-    while true do
-        for tool, data in pairs(ToolData) do
-            if tool.Parent == lp.Backpack and shouldSell(tool, data) then
-                table.insert(Queue, tool)
-            end
-        end
-        processQueue()
-        task.wait(SELL_DELAY)
-    end
-end)
-
--- ================== RESPAWN ==================
-lp.CharacterAdded:Connect(function()
-    task.wait(0.2)
-    ToolData = {}
-    Queue = {}
-    hookBackpack()
-end)
-
--- ================== INIT ==================
-hookBackpack()
-
 -- ================== UI ==================
+local function getBlacklistDropdown()
+    local t = {}
+    for _, data in pairs(ToolData) do
+        table.insert(t, makeKey(data))
+    end
+    table.sort(t)
+    return t
+end
+
 WaveTab:Toggle({
     Title = "Auto Sell",
     Value = AUTO_SELL,
-    Callback = function(state)
-        AUTO_SELL = state
+    Callback = function(v)
+        AUTO_SELL = v
     end
 })
 
@@ -1006,8 +957,8 @@ WaveTab:Slider({
     Title = "Min Level To Sell",
     Value = { Min = 1, Max = 20, Default = MIN_LEVEL },
     Step = 1,
-    Callback = function(value)
-        MIN_LEVEL = value
+    Callback = function(v)
+        MIN_LEVEL = v
     end
 })
 
@@ -1015,11 +966,10 @@ WaveTab:Dropdown({
     Title = "Sell Classes",
     Values = {
         "Common","Uncommon","Rare",
-        "Legendary","Mythical","Cosmic",
-        "Secret","Celestial"
+        "Legendary","Mythical",
+        "Cosmic","Secret","Celestial"
     },
     Multi = true,
-    AllowNone = true,
     Callback = function(list)
         table.clear(SELL_CLASSES)
         for _, c in ipairs(list) do
@@ -1028,20 +978,11 @@ WaveTab:Dropdown({
     end
 })
 
--- ================== DROPDOWN : BLACKLIST ==================
 WaveTab:Dropdown({
     Title = "Blacklist",
     Desc = "[Mutation] Name [Lv]",
-    Values = (function()
-        local t = {}
-        for _, v in ipairs(BlacklistFolder:GetChildren()) do
-            table.insert(t, v.Name)
-        end
-        table.sort(t)
-        return t
-    end)(),
+    Values = getBlacklistDropdown(),
     Multi = true,
-    AllowNone = true,
     Callback = function(selected)
         for _, v in ipairs(BlacklistFolder:GetChildren()) do
             v:Destroy()
@@ -1049,11 +990,40 @@ WaveTab:Dropdown({
         for _, key in ipairs(selected) do
             local sv = Instance.new("StringValue")
             sv.Name = key
+            sv.Value = key
             sv.Parent = BlacklistFolder
         end
+        rebuildBlacklist()
     end
 })
 
+-- ================== AUTO SELL LOOP ==================
+task.spawn(function()
+    while task.wait(SELL_DELAY) do
+        if not AUTO_SELL then continue end
+
+        for tool, data in pairs(ToolData) do
+            if tool.Parent == lp.Backpack
+            and data.Level <= MIN_LEVEL
+            and SELL_CLASSES[data.Class]
+            and not Blacklist[makeKey(data)]
+            then
+                tool.Parent = getChar()
+                task.wait(SELL_DELAY)
+                SellRemote:InvokeServer()
+                task.wait(SELL_DELAY)
+            end
+        end
+    end
+end)
+
+-- ================== INIT ==================
+hookBackpack()
+lp.CharacterAdded:Connect(function()
+    task.wait(0.3)
+    table.clear(ToolData)
+    hookBackpack()
+end)
 
 WaveTab:Button({
     Title = "Tween Gap",
