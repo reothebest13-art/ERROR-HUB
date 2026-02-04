@@ -823,168 +823,205 @@ end)
 local WaveTab = Window:Tab({Title = "Wave", Icon = "user"})
 
 
-
-
 -- ================== SERVICES ==================
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local Workspace = game:GetService("Workspace")
 
 local lp = Players.LocalPlayer
-local SellRemote = ReplicatedStorage
-    :WaitForChild("RemoteFunctions")
+local SellRemote =
+    ReplicatedStorage:WaitForChild("RemoteFunctions")
     :WaitForChild("SellTool")
 
 -- ================== CONFIG ==================
-local AutoSell = false
-local MaxSellLevel = 1
-local AllowedClasses = {}
-local Blacklist = {}
+local EQUIP_DELAY = 0.01
 
 -- ================== DATA ==================
-local Scanned = {}        -- [tool] = data
-local ClassCache = {}    -- [tool] = class
+local ScannedData = {}   -- [tool] = {Name, Level, Mutation, Class}
+local Checked = {}
 
--- ================== BLACKLIST FOLDER ==================
-local BlacklistFolder = Workspace:FindFirstChild("BlacklistFolder")
-if not BlacklistFolder then
-    BlacklistFolder = Instance.new("Folder")
-    BlacklistFolder.Name = "BlacklistFolder"
-    BlacklistFolder.Parent = Workspace
+-- ================== UI STATE ==================
+local SellingEnabled = false
+local MinLevel = 1
+local SelectedClasses = {} -- [Class] = true
+local Blacklist = {}       -- [key] = true
+
+-- ================== UTILS ==================
+local function getChar()
+    return lp.Character or lp.CharacterAdded:Wait()
 end
 
--- ================== UTIL ==================
-local function getAttr(tool, name)
-    return tool:GetAttribute(name)
-end
-
-local function getClassFromTool(tool)
-    local rm = tool:FindFirstChild("RenderModel")
-    if not rm then return end
-
-    for _, m in ipairs(rm:GetChildren()) do
-        local me = m:FindFirstChild("ModelExtents")
-        local gui = me and me:FindFirstChild("StatsGui")
-        local frame = gui and gui:FindFirstChild("Frame")
-        local class = frame and frame:FindFirstChild("Class")
-        if class and class:IsA("TextLabel") then
-            return class.Text
-        end
+local function shouldIgnore(tool)
+    if tool:FindFirstChild("Hitbox") then
+        return true
     end
+    local ok, tip = pcall(function()
+        return tool.ToolTip
+    end)
+    if ok and type(tip) == "string" and tip ~= "" then
+        return true
+    end
+    return false
 end
 
-local function formatKey(data)
-    return string.format(
-        "[%s] %s [Lv %s]",
-        data.Mutation or "None",
-        data.Name or "Unknown",
-        tostring(data.Level or "?")
+local function makeKey(data)
+    return string.format("[%s] %s [Lv %s]",
+        tostring(data.Mutation),
+        tostring(data.Name),
+        tostring(data.Level)
     )
 end
 
--- ================== SCAN ==================
-local function scanTool(tool)
-    if not tool:IsA("Tool") then return end
+-- ================== CLASS (NEED EQUIP) ==================
+local function readClass(tool)
+    local char = getChar()
+    tool.Parent = char
+    task.wait(EQUIP_DELAY)
 
-    local name = getAttr(tool, "BrainrotName")
-    local level = getAttr(tool, "Level")
-    local mutation = getAttr(tool, "Mutation")
-
-    if not name or not level then return end
-
-    Scanned[tool] = {
-        Tool = tool,
-        Name = name,
-        Level = level,
-        Mutation = mutation,
-        Class = ClassCache[tool]
-    }
-end
-
--- ================== HOLD CHECK ==================
-local function watchCharacter(char)
-    char.ChildAdded:Connect(function(obj)
-        if obj:IsA("Tool") then
-            local class = getClassFromTool(obj)
-            if class then
-                ClassCache[obj] = class
-                if Scanned[obj] then
-                    Scanned[obj].Class = class
-                end
+    local classText
+    local rm = tool:FindFirstChild("RenderModel")
+    if rm then
+        for _, model in ipairs(rm:GetChildren()) do
+            local me = model:FindFirstChild("ModelExtents")
+            local gui = me and me:FindFirstChild("StatsGui")
+            local frame = gui and gui:FindFirstChild("Frame")
+            local class = frame and frame:FindFirstChild("Class")
+            if class and class:IsA("TextLabel") then
+                classText = class.Text
+                break
             end
         end
-    end)
+    end
+
+    if tool.Parent == char then
+        tool.Parent = lp.Backpack
+    end
+
+    return classText
+end
+
+-- ================== SCAN (NO EQUIP) ==================
+local function scanTool(tool)
+    if not tool:IsA("Tool") then return end
+    if Checked[tool] then return end
+    Checked[tool] = true
+    if shouldIgnore(tool) then return end
+
+    local rm = tool:FindFirstChild("RenderModel")
+    if not rm then return end
+
+    local data = {
+        Name = rm:GetAttribute("BrainrotName"),
+        Level = rm:GetAttribute("Level"),
+        Mutation = rm:GetAttribute("Mutation"),
+        Class = nil
+    }
+
+    if data.Name then
+        ScannedData[tool] = data
+        print("[SCAN]", makeKey(data))
+    end
+end
+
+-- ================== SELL ==================
+local function trySell(tool, data)
+    if not SellingEnabled then return end
+    if not data then return end
+    if data.Level < MinLevel then return end
+
+    if next(SelectedClasses) and not SelectedClasses[data.Class] then
+        return
+    end
+
+    local key = makeKey(data)
+    if Blacklist[key] then
+        return
+    end
+
+    tool.Parent = getChar()
+    task.wait(EQUIP_DELAY)
+    SellRemote:InvokeServer()
+end
+
+local function processSell()
+    for tool, data in pairs(ScannedData) do
+        if tool.Parent == lp.Backpack then
+            if not data.Class then
+                data.Class = readClass(tool)
+            end
+            trySell(tool, data)
+        end
+    end
 end
 
 -- ================== BACKPACK WATCH ==================
 local function hookBackpack()
-    local bp = lp:WaitForChild("Backpack")
+    local backpack = lp:WaitForChild("Backpack")
 
-    for _, t in ipairs(bp:GetChildren()) do
-        scanTool(t)
+    for _, tool in ipairs(backpack:GetChildren()) do
+        scanTool(tool)
     end
 
-    bp.ChildAdded:Connect(scanTool)
+    backpack.ChildAdded:Connect(function(tool)
+        scanTool(tool)
+        task.defer(processSell)
+    end)
 end
 
--- ================== SELL LOOP ==================
-task.spawn(function()
-    while true do
-        task.wait(0.5)
-        if not AutoSell then continue end
-
-        for tool, data in pairs(Scanned) do
-            if not tool.Parent then
-                Scanned[tool] = nil
-                continue
-            end
-
-            if data.Level > MaxSellLevel then continue end
-            if next(AllowedClasses) and not AllowedClasses[data.Class] then continue end
-
-            local key = formatKey(data)
-            if Blacklist[key] then continue end
-
-            -- ขาย
-            pcall(function()
-                SellRemote:InvokeServer()
-            end)
-        end
-    end
+-- ================== RESPAWN ==================
+lp.CharacterAdded:Connect(function()
+    task.defer(function()
+        Checked = {}
+        hookBackpack()
+    end)
 end)
 
--- ================== UI ==================
+-- ================== INIT ==================
+hookBackpack()
 
+-- =====================================================
+-- ================== UI (API YOU GAVE) =================
+-- =====================================================
+
+-- Toggle เริ่มขาย
 WaveTab:Toggle({
     Title = "Auto Sell",
     Value = false,
-    Callback = function(v)
-        AutoSell = v
-    end
-})
-
-WaveTab:Slider({
-    Title = "Max Level To Sell",
-    Value = { Min = 1, Max = 10, Default = 1 },
-    Step = 1,
-    Callback = function(v)
-        MaxSellLevel = v
-    end
-})
-
-WaveTab:Dropdown({
-    Title = "Class Filter",
-    Values = {},
-    Multi = true,
-    AllowNone = true,
-    Callback = function(list)
-        AllowedClasses = {}
-        for _, c in ipairs(list) do
-            AllowedClasses[c] = true
+    Callback = function(state)
+        SellingEnabled = state
+        if state then
+            task.defer(processSell)
         end
     end
 })
 
+-- Slider เลเวลขั้นต่ำ
+WaveTab:Slider({
+    Title = "Min Level",
+    Value = { Min = 1, Max = 100, Default = 1 },
+    Step = 1,
+    Callback = function(value)
+        MinLevel = value
+    end
+})
+
+-- Dropdown เลือก Class
+WaveTab:Dropdown({
+    Title = "Sell Class",
+    Values = {
+        "Common","Uncommon","Rare","Epic",
+        "Legendary","Mythical","Cosmic","Secret","Celestial"
+    },
+    Multi = true,
+    AllowNone = true,
+    Callback = function(list)
+        SelectedClasses = {}
+        for _, v in ipairs(list) do
+            SelectedClasses[v] = true
+        end
+    end
+})
+
+-- Dropdown Blacklist (ดึงจากของที่สแกนได้)
 WaveTab:Dropdown({
     Title = "Blacklist",
     Desc = "[Mutation] Name [Lv]",
@@ -999,41 +1036,17 @@ WaveTab:Dropdown({
     end
 })
 
--- ================== UPDATE DROPDOWNS ==================
+-- เติมค่า Blacklist dropdown แบบ realtime
 task.spawn(function()
     while true do
+        local values = {}
+        for _, data in pairs(ScannedData) do
+            table.insert(values, makeKey(data))
+        end
+        WaveTab:UpdateDropdown("Blacklist", values)
         task.wait(1)
-
-        local classSet = {}
-        local blacklistValues = {}
-
-        for _, data in pairs(Scanned) do
-            if data.Class then
-                classSet[data.Class] = true
-            end
-
-            table.insert(blacklistValues, formatKey(data))
-        end
-
-        local classValues = {}
-        for c in pairs(classSet) do
-            table.insert(classValues, c)
-        end
-
-        -- สมมุติว่า UI lib รองรับ SetValues
-        pcall(function()
-            WaveTab:SetDropdownValues("Class Filter", classValues)
-            WaveTab:SetDropdownValues("Blacklist", blacklistValues)
-        end)
     end
 end)
-
--- ================== INIT ==================
-hookBackpack()
-if lp.Character then
-    watchCharacter(lp.Character)
-end
-lp.CharacterAdded:Connect(watchCharacter)
 
 
 
