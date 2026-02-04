@@ -822,141 +822,237 @@ end)
 
 local WaveTab = Window:Tab({Title = "Wave", Icon = "user"})
 
--- ================= SERVICES =================
+-- ================== SERVICES ==================
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local lp = Players.LocalPlayer
 
+local lp = Players.LocalPlayer
 local SellRemote =
     ReplicatedStorage:WaitForChild("RemoteFunctions")
     :WaitForChild("SellTool")
 
--- ================= CONFIG =================
-local AutoSellEnabled = false
-local MaxSellLevel = nil
+-- ================== CONFIG ==================
+local SELL_DELAY = 0.01
+local AUTO_SELL = true
+local MIN_LEVEL = 1
+local SELL_CLASSES = {
+    Common = true,
+    Uncommon = true,
+    Rare = true,
+}
 
-local SelectedClasses = {} -- [Class] = true
-local Blacklist = {}       -- ["[Mutation] Name [Lv]"] = true
-
--- ================= CACHE =================
-local CachedBlacklistValues = {}
-
--- ================= UI =================
--- Toggle
-WaveTab:Toggle({
-    Title = "Auto Sell",
-    Value = false,
-    Callback = function(v)
-        AutoSellEnabled = v
-    end
-})
-
--- Slider
-WaveTab:Slider({
-    Title = "Max Level To Sell",
-    Value = { Min = 1, Max = 10, Default = 3 },
-    Step = 1,
-    Callback = function(v)
-        MaxSellLevel = v
-    end
-})
-
--- Class Dropdown
-WaveTab:Dropdown({
-    Title = "Select Class",
-    Values = { "Common", "Rare", "Epic", "Legendary" },
-    Multi = true,
-    AllowNone = true,
-    Callback = function(list)
-        table.clear(SelectedClasses)
-        for _, v in ipairs(list) do
-            SelectedClasses[v] = true
-        end
-    end
-})
-
--- Blacklist Dropdown (อัปเดตทีหลัง)
-local BlacklistDropdown = WaveTab:Dropdown({
-    Title = "Blacklist",
-    Desc = "[Mutation] Name [Lv]",
-    Values = {},
-    Multi = true,
-    AllowNone = true,
-    Callback = function(list)
-        table.clear(Blacklist)
-        for _, v in ipairs(list) do
-            Blacklist[v] = true
-        end
-    end
-})
-
--- ================= SCAN FUNCTION =================
-local function ScanBackpack()
-    local results = {}
-    local blacklistValues = {}
-
-    for _, tool in ipairs(lp.Backpack:GetChildren()) do
-        if tool:IsA("Tool") then
-            local brainrotName = tool:GetAttribute("BrainrotName")
-            local level = tool:GetAttribute("Level")
-            local mutation = tool:GetAttribute("Mutation")
-            local class = tool:GetAttribute("Class")
-
-            if brainrotName and level and mutation then
-                local display = ("[%s] %s [Lv %s]"):format(
-                    tostring(mutation),
-                    tostring(brainrotName),
-                    tostring(level)
-                )
-
-                blacklistValues[display] = true
-
-                table.insert(results, {
-                    Tool = tool,
-                    Name = brainrotName,
-                    Level = level,
-                    Mutation = mutation,
-                    Class = class,
-                    Display = display
-                })
-            end
-        end
-    end
-
-    -- update blacklist dropdown values
-    CachedBlacklistValues = {}
-    for v in pairs(blacklistValues) do
-        table.insert(CachedBlacklistValues, v)
-    end
-
-    BlacklistDropdown:SetValues(CachedBlacklistValues)
-
-    return results
+-- ================== BLACKLIST FOLDER ==================
+local BlacklistFolder = workspace:FindFirstChild("BlacklistFolder")
+if not BlacklistFolder then
+    BlacklistFolder = Instance.new("Folder")
+    BlacklistFolder.Name = "BlacklistFolder"
+    BlacklistFolder.Parent = workspace
 end
 
--- ================= AUTO SELL LOOP =================
+-- ================== BLACKLIST CACHE ==================
+local Blacklist = {}
+
+local function rebuildBlacklist()
+    table.clear(Blacklist)
+    for _, v in ipairs(BlacklistFolder:GetChildren()) do
+        Blacklist[v.Name] = true
+    end
+end
+
+rebuildBlacklist()
+BlacklistFolder.ChildAdded:Connect(rebuildBlacklist)
+BlacklistFolder.ChildRemoved:Connect(rebuildBlacklist)
+
+-- ================== DATA ==================
+local ToolData = {}
+local Queue = {}
+local Selling = false
+
+-- ================== UTILS ==================
+local function getChar()
+    return lp.Character or lp.CharacterAdded:Wait()
+end
+
+local function isRealRemoved(tool)
+    if tool:IsDescendantOf(lp.Backpack) then return false end
+    if lp.Character and tool:IsDescendantOf(lp.Character) then return false end
+    return true
+end
+
+-- ================== CLASS READER ==================
+local function readClass(tool)
+    local rm = tool:FindFirstChild("RenderModel")
+    if not rm then return end
+
+    for _, model in ipairs(rm:GetChildren()) do
+        local me = model:FindFirstChild("ModelExtents")
+        local gui = me and me:FindFirstChild("StatsGui")
+        local frame = gui and gui:FindFirstChild("Frame")
+        local class = frame and frame:FindFirstChild("Class")
+        if class and class:IsA("TextLabel") then
+            return class.Text
+        end
+    end
+end
+
+-- ================== SCAN ==================
+local function scanTool(tool)
+    if not tool:IsA("Tool") then return end
+    if ToolData[tool] then return end
+
+    local name = tool:GetAttribute("BrainrotName")
+    local level = tool:GetAttribute("Level")
+    local mutation = tool:GetAttribute("Mutation") or "None"
+
+    tool.Parent = getChar()
+    task.wait(SELL_DELAY)
+    local class = readClass(tool)
+    tool.Parent = lp.Backpack
+
+    if not class then return end
+
+    ToolData[tool] = {
+        Name = name or tool.Name,
+        Level = level or 0,
+        Mutation = mutation,
+        Class = class
+    }
+end
+
+-- ================== SELL LOGIC ==================
+local function makeKey(data)
+    return string.format("[%s] %s [%d]", data.Mutation, data.Name, data.Level)
+end
+
+local function shouldSell(tool, data)
+    if not AUTO_SELL then return false end
+    if not SELL_CLASSES[data.Class] then return false end
+    if data.Level > MIN_LEVEL then return false end
+    if Blacklist[makeKey(data)] then return false end
+    return true
+end
+
+local function processQueue()
+    if Selling then return end
+    Selling = true
+
+    while #Queue > 0 do
+        local tool = table.remove(Queue, 1)
+        if tool and tool.Parent == lp.Backpack then
+            tool.Parent = getChar()
+            task.wait(SELL_DELAY)
+            SellRemote:InvokeServer()
+            task.wait(SELL_DELAY)
+        end
+    end
+
+    Selling = false
+end
+
+-- ================== BACKPACK WATCH ==================
+local function hookBackpack()
+    local backpack = lp:WaitForChild("Backpack")
+
+    for _, tool in ipairs(backpack:GetChildren()) do
+        scanTool(tool)
+    end
+
+    backpack.ChildAdded:Connect(function(tool)
+        task.defer(scanTool, tool)
+    end)
+
+    backpack.ChildRemoved:Connect(function(tool)
+        task.wait()
+        if ToolData[tool] and isRealRemoved(tool) then
+            ToolData[tool] = nil
+        end
+    end)
+end
+
+-- ================== AUTO SELL LOOP ==================
 task.spawn(function()
     while true do
-        if AutoSellEnabled and MaxSellLevel then
-            local items = ScanBackpack()
-
-            for _, data in ipairs(items) do
-                local tool = data.Tool
-
-                if tool
-                and data.Level <= MaxSellLevel
-                and (not next(SelectedClasses) or SelectedClasses[data.Class])
-                and not Blacklist[data.Display] then
-
-                    SellRemote:InvokeServer(tool)
-                    task.wait(0.01) -- เร็วสุดแบบไม่เตะเซิร์ฟ
-                end
+        for tool, data in pairs(ToolData) do
+            if tool.Parent == lp.Backpack and shouldSell(tool, data) then
+                table.insert(Queue, tool)
             end
         end
-
-        task.wait(0.1) -- สแกนตลอด แต่ไม่แลค
+        processQueue()
+        task.wait(SELL_DELAY)
     end
 end)
+
+-- ================== RESPAWN ==================
+lp.CharacterAdded:Connect(function()
+    task.wait(0.2)
+    ToolData = {}
+    Queue = {}
+    hookBackpack()
+end)
+
+-- ================== INIT ==================
+hookBackpack()
+
+-- ================== UI ==================
+WaveTab:Toggle({
+    Title = "Auto Sell",
+    Value = AUTO_SELL,
+    Callback = function(state)
+        AUTO_SELL = state
+    end
+})
+
+WaveTab:Slider({
+    Title = "Min Level To Sell",
+    Value = { Min = 1, Max = 20, Default = MIN_LEVEL },
+    Step = 1,
+    Callback = function(value)
+        MIN_LEVEL = value
+    end
+})
+
+WaveTab:Dropdown({
+    Title = "Sell Classes",
+    Values = {
+        "Common","Uncommon","Rare",
+        "Legendary","Mythical","Cosmic",
+        "Secret","Celestial"
+    },
+    Multi = true,
+    AllowNone = true,
+    Callback = function(list)
+        table.clear(SELL_CLASSES)
+        for _, c in ipairs(list) do
+            SELL_CLASSES[c] = true
+        end
+    end
+})
+
+-- ================== DROPDOWN : BLACKLIST ==================
+WaveTab:Dropdown({
+    Title = "Blacklist",
+    Desc = "[Mutation] Name [Lv]",
+    Values = (function()
+        local t = {}
+        for _, v in ipairs(BlacklistFolder:GetChildren()) do
+            table.insert(t, v.Name)
+        end
+        table.sort(t)
+        return t
+    end)(),
+    Multi = true,
+    AllowNone = true,
+    Callback = function(selected)
+        for _, v in ipairs(BlacklistFolder:GetChildren()) do
+            v:Destroy()
+        end
+        for _, key in ipairs(selected) do
+            local sv = Instance.new("StringValue")
+            sv.Name = key
+            sv.Parent = BlacklistFolder
+        end
+    end
+})
 
 
 WaveTab:Button({
