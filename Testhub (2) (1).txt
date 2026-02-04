@@ -1014,17 +1014,34 @@ WaveTab:Dropdown({
     end
 })
 
-WaveTab:Dropdown({
+-- ================== DROPDOWN SOURCE ==================
+local function getBlacklistDropdownValues()
+    local t = {}
+    for _, v in ipairs(CacheFolder:GetChildren()) do
+        if v:IsA("StringValue") then
+            table.insert(t, v.Value)
+        end
+    end
+    table.sort(t)
+    return t
+end
+
+-- ================== UI ==================
+local BlacklistDropdown
+
+BlacklistDropdown = WaveTab:Dropdown({
     Title = "Blacklist",
     Desc = "[Mutation] Name [Lv]",
-    Values = getBlacklistDropdownValues(),
+    Values = {}, -- เริ่มว่างก่อน
     Multi = true,
     AllowNone = true,
     Callback = function(selected)
+        -- ล้างของเก่า
         for _, v in ipairs(BlacklistFolder:GetChildren()) do
             v:Destroy()
         end
 
+        -- ใส่ blacklist ใหม่
         for _, key in ipairs(selected) do
             local sv = Instance.new("StringValue")
             sv.Name = key
@@ -1035,6 +1052,19 @@ WaveTab:Dropdown({
         rebuildBlacklist()
     end
 })
+
+-- ================== CACHE → DROPDOWN REFRESH ==================
+local function refreshDropdown()
+    if BlacklistDropdown then
+        BlacklistDropdown:SetValues(getBlacklistDropdownValues())
+    end
+end
+
+CacheFolder.ChildAdded:Connect(refreshDropdown)
+CacheFolder.ChildRemoved:Connect(refreshDropdown)
+
+-- เรียกครั้งแรกหลัง hook backpack
+task.delay(0.2, refreshDropdown)
 
 -- ================== AUTO SELL LOOP ==================
 task.spawn(function()
