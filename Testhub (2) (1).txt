@@ -822,206 +822,155 @@ end)
 
 local WaveTab = Window:Tab({Title = "Wave", Icon = "user"})
 
--- ================== SERVICES ==================
+
+-- ================= SERVICES =================
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local lp = Players.LocalPlayer
-local backpack = lp:WaitForChild("Backpack")
+local Backpack = lp:WaitForChild("Backpack")
 
 local SellRemote =
     ReplicatedStorage
-        :WaitForChild("RemoteFunctions")
-        :WaitForChild("SellTool")
+    :WaitForChild("RemoteFunctions")
+    :WaitForChild("SellTool")
 
--- ================== CONFIG ==================
-local delay_sell = 0.03
+-- ================= STATE =================
+local sellEnabled = false
+local selectedRarities = {}   -- เลือกได้หลายอัน
+local scannedTools = {}
+local classData = {}
+local selling = false        -- กันยิงซ้อน
 
--- ================== DATA ==================
-local Checked = {}
-local ClassData = {}
-local queue = {}
-
-local scanning = false
-local selling = false
-local backpackConn
-
--- global state (จำค่า)
-getgenv().AutoSellState = getgenv().AutoSellState or {
-    Enabled = false,        -- Toggle
-    CurrentClass = nil      -- Dropdown
+-- ================= VALID RARITY =================
+local VALID_RARITIES = {
+    Common = true,
+    Uncommon = true,
+    Rare = true,
+    Epic = true,
+    Legendary = true,
+    Mythical = true,
+    Cosmic = true,
+    Secret = true,
+    Celestial = true,
+    Divine = true
 }
 
--- ================== UTILS ==================
-local function getCharacter()
-    return lp.Character or lp.CharacterAdded:Wait()
+-- ================= UTILS =================
+local function resetScan()
+    scannedTools = {}
+    classData = {}
 end
 
-local function hasToolTipText(tool)
-    local ok, tip = pcall(function()
-        return tool.ToolTip
-    end)
-    return ok and type(tip) == "string" and tip ~= ""
-end
-
-local function shouldSkip(tool)
-    if hasToolTipText(tool) then return true end
-    if tool:FindFirstChild("Hitbox") then return true end
-    return false
-end
-
-local function getClassFromTool(tool)
-    local rm = tool:FindFirstChild("RenderModel")
-    if not rm then return nil end
-
-    for _, model in ipairs(rm:GetChildren()) do
-        local me = model:FindFirstChild("ModelExtents")
-        local stats = me and me:FindFirstChild("StatsGui")
-        local frame = stats and stats:FindFirstChild("Frame")
-        local class = frame and frame:FindFirstChild("Class")
-
-        if class and class:IsA("TextLabel") then
-            return class.Text
-        end
+local function getToolRarity(tool)
+    if classData[tool] then
+        return classData[tool]
     end
+
+    local rarityValue =
+        tool:FindFirstChild("Class")
+        or tool:FindFirstChild("Rarity")
+        or tool:FindFirstChildWhichIsA("StringValue")
+
+    if rarityValue and VALID_RARITIES[rarityValue.Value] then
+        classData[tool] = rarityValue.Value
+        return rarityValue.Value
+    end
+
     return nil
 end
 
--- ================== SCAN ==================
-local function scanTool(tool)
-    if scanning then return end
-    if not tool:IsA("Tool") then return end
-    if Checked[tool] then return end
-    Checked[tool] = true
-
-    if shouldSkip(tool) then return end
-
-    scanning = true
-    local char = getCharacter()
-
-    tool.Parent = char
-    task.wait(delay_sell)
-
-    local class = getClassFromTool(tool)
-    if class then
-        ClassData[tool] = class
-
-        -- ถ้า Toggle เปิด + class ตรง → เข้าคิวขายทันที
-        local state = getgenv().AutoSellState
-        if state.Enabled and state.CurrentClass == class then
-            table.insert(queue, tool)
-        end
-    end
-
-    if tool.Parent == char then
-        tool.Parent = backpack
-    end
-
-    scanning = false
-end
-
-local function scanAll()
-    Checked = {}
-    for _, tool in ipairs(backpack:GetChildren()) do
-        scanTool(tool)
-        task.wait(delay_sell)
-    end
-end
-
--- ================== SELL ==================
-local function processQueue()
+-- ================= SELL =================
+local function trySell(tool)
+    if not sellEnabled then return end
     if selling then return end
+
+    local rarity = getToolRarity(tool)
+    if not rarity then return end
+    if not selectedRarities[rarity] then return end
+
     selling = true
-
-    while #queue > 0 do
-        local tool = table.remove(queue, 1)
-        if tool and tool.Parent == backpack then
-            tool.Parent = getCharacter()
-            task.wait(delay_sell)
-            SellRemote:InvokeServer()
-            task.wait(delay_sell)
-        end
-    end
-
-    selling = false
-end
-
-local function sellExistingByCurrentClass()
-    local state = getgenv().AutoSellState
-    if not (state.Enabled and state.CurrentClass) then return end
-
-    for tool, class in pairs(ClassData) do
-        if class == state.CurrentClass and tool.Parent == backpack then
-            table.insert(queue, tool)
-        end
-    end
-
-    processQueue()
-end
-
--- ================== WATCH BACKPACK ==================
-local function connectBackpackWatcher()
-    if backpackConn then
-        backpackConn:Disconnect()
-    end
-
-    backpackConn = backpack.ChildAdded:Connect(function(tool)
-        task.wait(0.1)
-        scanTool(tool)
-        processQueue()
+    task.delay(0.05, function()
+        pcall(function()
+            SellRemote:InvokeServer(tool)
+        end)
+        selling = false
     end)
 end
 
--- ================== UI (FarmTab) ==================
-WaveTab:Dropdown({
+-- ================= SCAN =================
+local function scanTool(tool)
+    if not tool:IsA("Tool") then return end
+    if scannedTools[tool] then return end
+
+    scannedTools[tool] = true
+    trySell(tool)
+end
+
+local function scanAll()
+    for _, tool in ipairs(Backpack:GetChildren()) do
+        scanTool(tool)
+    end
+end
+
+-- ================= EVENTS =================
+-- ของใหม่เข้า
+Backpack.ChildAdded:Connect(scanTool)
+
+-- ตาย / เกิดใหม่
+lp.CharacterAdded:Connect(function()
+    task.wait(0.3)
+    resetScan()
+    if sellEnabled then
+        scanAll()
+    end
+end)
+
+-- ================= UI =================
+-- 🔽 Dropdown (เลือกหลายอัน)
+FarmTab:Dropdown({
     Title = "Select Rarity Brainrot",
-    Desc = "เลือกระดับความหายาก",
+    Desc = "เลือกระดับความหายากที่ต้องการจะขาย (เลือกหลายอันได้)",
     Values = {
-        "Common","Uncommon","Rare","Epic",
-        "Legendary","Mythical","Cosmic",
-        "Secret","Celestial","Divine"
+        "Common",
+        "Uncommon",
+        "Rare",
+        "Epic",
+        "Legendary",
+        "Mythical",
+        "Cosmic",
+        "Secret",
+        "Celestial",
+        "Divine"
     },
-    Multi = false,
+    Multi = true,      -- ✅ เลือกหลายอัน
     AllowNone = true,
     Callback = function(selected)
-        getgenv().AutoSellState.CurrentClass = selected
-        -- ถ้า Toggle เปิด → ใช้เงื่อนไขใหม่กับของที่มีอยู่
-        sellExistingByCurrentClass()
-    end
-})
+        selectedRarities = {}
 
-WaveTab:Toggle({
-    Title = "Auto Sell Brainrot",
-    Desc = "ขายตามระดับที่เลือก",
-    Default = getgenv().AutoSellState.Enabled,
-    Callback = function(state)
-        getgenv().AutoSellState.Enabled = state
-        if state then
-            sellExistingByCurrentClass()
+        for _, rarity in ipairs(selected) do
+            selectedRarities[rarity] = true
+        end
+
+        -- เลือกทีหลัง → ของเดิมก็ขาย
+        if sellEnabled then
+            scanAll()
         end
     end
 })
 
--- ================== RESPAWN ==================
-lp.CharacterAdded:Connect(function()
-    task.wait(0.5)
-    Checked = {}
-    ClassData = {}
-    queue = {}
-    scanning = false
-    selling = false
-
-    scanAll()
-    connectBackpackWatcher()
-
-    -- ถ้าเปิดอยู่ → ใช้ข้อมูลเดิมต่อ
-    sellExistingByCurrentClass()
-end)
-
--- ================== INIT ==================
-scanAll()
-connectBackpackWatcher()
-
+-- 🔘 Toggle เปิด/ปิดระบบ
+FarmTab:Toggle({
+    Title = "Auto Sell By Rarity",
+    Desc = "ขายอัตโนมัติตามระดับที่เลือก (เลือกได้หลายระดับ)",
+    Default = false,
+    Callback = function(state)
+        sellEnabled = state
+        if state then
+            scanAll()
+        end
+    end
+})
 
 
 
