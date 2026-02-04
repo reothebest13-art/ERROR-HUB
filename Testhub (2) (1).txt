@@ -824,189 +824,216 @@ local WaveTab = Window:Tab({Title = "Wave", Icon = "user"})
 
 
 
+
 -- ================== SERVICES ==================
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local lp = Players.LocalPlayer
+local Workspace = game:GetService("Workspace")
 
-local SellRemote =
-	ReplicatedStorage:WaitForChild("RemoteFunctions")
-	:WaitForChild("SellTool")
+local lp = Players.LocalPlayer
+local SellRemote = ReplicatedStorage
+    :WaitForChild("RemoteFunctions")
+    :WaitForChild("SellTool")
 
 -- ================== CONFIG ==================
-local HOLD_TIME = 0.01
-
--- ================== STATE ==================
 local AutoSell = false
 local MaxSellLevel = 1
-local AllowedClasses = {}       -- [Class] = true
-local Blacklist = {}            -- [Key] = true
+local AllowedClasses = {}
+local Blacklist = {}
 
--- ================== CACHE ==================
-local Cache = {}                -- [Tool] = data
-local BlacklistOptions = {}     -- string list for dropdown
+-- ================== DATA ==================
+local Scanned = {}        -- [tool] = data
+local ClassCache = {}    -- [tool] = class
 
--- ================== FILTER ==================
-local function shouldIgnore(tool)
-	return tool:FindFirstChild("Hitbox") ~= nil
+-- ================== BLACKLIST FOLDER ==================
+local BlacklistFolder = Workspace:FindFirstChild("BlacklistFolder")
+if not BlacklistFolder then
+    BlacklistFolder = Instance.new("Folder")
+    BlacklistFolder.Name = "BlacklistFolder"
+    BlacklistFolder.Parent = Workspace
 end
 
--- ================== CLASS READER ==================
-local function readClass(tool)
-	local rm = tool:FindFirstChild("RenderModel")
-	if not rm then return end
-
-	for _, m in ipairs(rm:GetChildren()) do
-		local me = m:FindFirstChild("ModelExtents")
-		local gui = me and me:FindFirstChild("StatsGui")
-		local frame = gui and gui:FindFirstChild("Frame")
-		local class = frame and frame:FindFirstChild("Class")
-		if class and class:IsA("TextLabel") then
-			return class.Text
-		end
-	end
+-- ================== UTIL ==================
+local function getAttr(tool, name)
+    return tool:GetAttribute(name)
 end
 
--- ================== BLACKLIST KEY ==================
-local function makeKey(data)
-	return string.format("[%s] %s [Lv %d]",
-		data.Mutation ~= "" and data.Mutation or "Normal",
-		data.Name,
-		data.Level
-	)
+local function getClassFromTool(tool)
+    local rm = tool:FindFirstChild("RenderModel")
+    if not rm then return end
+
+    for _, m in ipairs(rm:GetChildren()) do
+        local me = m:FindFirstChild("ModelExtents")
+        local gui = me and me:FindFirstChild("StatsGui")
+        local frame = gui and gui:FindFirstChild("Frame")
+        local class = frame and frame:FindFirstChild("Class")
+        if class and class:IsA("TextLabel") then
+            return class.Text
+        end
+    end
 end
 
--- ================== UPDATE BLACKLIST DROPDOWN ==================
-local BlacklistDropdown
-local function refreshBlacklistDropdown()
-	if not BlacklistDropdown then return end
-	BlacklistDropdown:SetValues(BlacklistOptions)
+local function formatKey(data)
+    return string.format(
+        "[%s] %s [Lv %s]",
+        data.Mutation or "None",
+        data.Name or "Unknown",
+        tostring(data.Level or "?")
+    )
 end
 
 -- ================== SCAN ==================
 local function scanTool(tool)
-	if not tool:IsA("Tool") then return end
-	if Cache[tool] then return end
-	if shouldIgnore(tool) then return end
+    if not tool:IsA("Tool") then return end
 
-	local name = tool:GetAttribute("BrainrotName")
-	local level = tool:GetAttribute("Level")
-	local mutation = tool:GetAttribute("Mutation") or ""
+    local name = getAttr(tool, "BrainrotName")
+    local level = getAttr(tool, "Level")
+    local mutation = getAttr(tool, "Mutation")
 
-	if not name or not level then return end
+    if not name or not level then return end
 
-	task.defer(function()
-		local char = lp.Character or lp.CharacterAdded:Wait()
+    Scanned[tool] = {
+        Tool = tool,
+        Name = name,
+        Level = level,
+        Mutation = mutation,
+        Class = ClassCache[tool]
+    }
+end
 
-		tool.Parent = char
-		task.wait(HOLD_TIME)
-
-		local class = readClass(tool)
-
-		if tool.Parent == char then
-			tool.Parent = lp.Backpack
-		end
-		if not class then return end
-
-		local data = {
-			Name = name,
-			Level = level,
-			Mutation = mutation,
-			Class = class
-		}
-
-		Cache[tool] = data
-
-		local key = makeKey(data)
-		if not table.find(BlacklistOptions, key) then
-			table.insert(BlacklistOptions, key)
-			refreshBlacklistDropdown()
-		end
-
-		print("[SCAN]", key, class)
-
-		-- ===== AUTO SELL =====
-		if AutoSell
-			and AllowedClasses[class]
-			and level <= MaxSellLevel
-			and not Blacklist[key] then
-
-			tool.Parent = char
-			task.wait(HOLD_TIME)
-			SellRemote:InvokeServer()
-		end
-	end)
+-- ================== HOLD CHECK ==================
+local function watchCharacter(char)
+    char.ChildAdded:Connect(function(obj)
+        if obj:IsA("Tool") then
+            local class = getClassFromTool(obj)
+            if class then
+                ClassCache[obj] = class
+                if Scanned[obj] then
+                    Scanned[obj].Class = class
+                end
+            end
+        end
+    end)
 end
 
 -- ================== BACKPACK WATCH ==================
 local function hookBackpack()
-	local bp = lp:WaitForChild("Backpack")
+    local bp = lp:WaitForChild("Backpack")
 
-	for _, t in ipairs(bp:GetChildren()) do
-		scanTool(t)
-	end
+    for _, t in ipairs(bp:GetChildren()) do
+        scanTool(t)
+    end
 
-	bp.ChildAdded:Connect(scanTool)
+    bp.ChildAdded:Connect(scanTool)
 end
 
-lp.CharacterAdded:Connect(function()
-	task.wait(0.2)
-	Cache = {}
-	BlacklistOptions = {}
-	hookBackpack()
+-- ================== SELL LOOP ==================
+task.spawn(function()
+    while true do
+        task.wait(0.5)
+        if not AutoSell then continue end
+
+        for tool, data in pairs(Scanned) do
+            if not tool.Parent then
+                Scanned[tool] = nil
+                continue
+            end
+
+            if data.Level > MaxSellLevel then continue end
+            if next(AllowedClasses) and not AllowedClasses[data.Class] then continue end
+
+            local key = formatKey(data)
+            if Blacklist[key] then continue end
+
+            -- ขาย
+            pcall(function()
+                SellRemote:InvokeServer()
+            end)
+        end
+    end
 end)
 
-hookBackpack()
-
 -- ================== UI ==================
--- ใช้ Tab ที่คุณมีอยู่แล้ว
 
-Tab:Toggle({
-	Title = "Auto Sell",
-	Value = false,
-	Callback = function(v)
-		AutoSell = v
-	end
+WaveTab:Toggle({
+    Title = "Auto Sell",
+    Value = false,
+    Callback = function(v)
+        AutoSell = v
+    end
 })
 
 WaveTab:Slider({
-	Title = "Max Level To Sell",
-	Value = { Min = 1, Max = 50, Default = 1 },
-	Step = 1,
-	Callback = function(v)
-		MaxSellLevel = v
-	end
+    Title = "Max Level To Sell",
+    Value = { Min = 1, Max = 10, Default = 1 },
+    Step = 1,
+    Callback = function(v)
+        MaxSellLevel = v
+    end
 })
 
 WaveTab:Dropdown({
-	Title = "Sell Classes",
-	Values = {
-		"Common","Uncommon","Rare","Epic",
-		"Legendary","Mythical","Cosmic","Secret","Celestial"
-	},
-	Multi = true,
-	AllowNone = true,
-	Callback = function(list)
-		AllowedClasses = {}
-		for _, c in ipairs(list) do
-			AllowedClasses[c] = true
-		end
-	end
+    Title = "Class Filter",
+    Values = {},
+    Multi = true,
+    AllowNone = true,
+    Callback = function(list)
+        AllowedClasses = {}
+        for _, c in ipairs(list) do
+            AllowedClasses[c] = true
+        end
+    end
 })
 
-BlacklistDropdown = WaveTab:Dropdown({
-	Title = "Blacklist",
-	Desc = "[Mutation] Name [Lv]",
-	Values = {},
-	Multi = true,
-	AllowNone = true,
-	Callback = function(list)
-		Blacklist = {}
-		for _, k in ipairs(list) do
-			Blacklist[k] = true
-		end
-	end
+WaveTab:Dropdown({
+    Title = "Blacklist",
+    Desc = "[Mutation] Name [Lv]",
+    Values = {},
+    Multi = true,
+    AllowNone = true,
+    Callback = function(list)
+        Blacklist = {}
+        for _, k in ipairs(list) do
+            Blacklist[k] = true
+        end
+    end
 })
+
+-- ================== UPDATE DROPDOWNS ==================
+task.spawn(function()
+    while true do
+        task.wait(1)
+
+        local classSet = {}
+        local blacklistValues = {}
+
+        for _, data in pairs(Scanned) do
+            if data.Class then
+                classSet[data.Class] = true
+            end
+
+            table.insert(blacklistValues, formatKey(data))
+        end
+
+        local classValues = {}
+        for c in pairs(classSet) do
+            table.insert(classValues, c)
+        end
+
+        -- สมมุติว่า UI lib รองรับ SetValues
+        pcall(function()
+            WaveTab:SetDropdownValues("Class Filter", classValues)
+            WaveTab:SetDropdownValues("Blacklist", blacklistValues)
+        end)
+    end
+end)
+
+-- ================== INIT ==================
+hookBackpack()
+if lp.Character then
+    watchCharacter(lp.Character)
+end
+lp.CharacterAdded:Connect(watchCharacter)
 
 
 
