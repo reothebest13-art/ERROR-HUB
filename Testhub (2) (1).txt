@@ -822,12 +822,13 @@ end)
 
 local WaveTab = Window:Tab({Title = "Wave", Icon = "user"})
 
-
 -- ================== SERVICES ==================
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local lp = Players.LocalPlayer
+local backpack = lp:WaitForChild("Backpack")
+
 local SellRemote =
     ReplicatedStorage
         :WaitForChild("RemoteFunctions")
@@ -845,8 +846,11 @@ local scanning = false
 local selling = false
 local backpackConn
 
-local sellToggleOn = false
-local selectedClasses = {}
+-- global state (จำค่า)
+getgenv().AutoSellState = getgenv().AutoSellState or {
+    Enabled = false,        -- Toggle
+    CurrentClass = nil      -- Dropdown
+}
 
 -- ================== UTILS ==================
 local function getCharacter()
@@ -901,11 +905,16 @@ local function scanTool(tool)
     local class = getClassFromTool(tool)
     if class then
         ClassData[tool] = class
-        print("[SCAN]", tool.Name, class)
+
+        -- ถ้า Toggle เปิด + class ตรง → เข้าคิวขายทันที
+        local state = getgenv().AutoSellState
+        if state.Enabled and state.CurrentClass == class then
+            table.insert(queue, tool)
+        end
     end
 
     if tool.Parent == char then
-        tool.Parent = lp.Backpack
+        tool.Parent = backpack
     end
 
     scanning = false
@@ -913,9 +922,6 @@ end
 
 local function scanAll()
     Checked = {}
-    ClassData = {}
-
-    local backpack = lp:WaitForChild("Backpack")
     for _, tool in ipairs(backpack:GetChildren()) do
         scanTool(tool)
         task.wait(delay_sell)
@@ -929,7 +935,7 @@ local function processQueue()
 
     while #queue > 0 do
         local tool = table.remove(queue, 1)
-        if tool and tool.Parent == lp.Backpack then
+        if tool and tool.Parent == backpack then
             tool.Parent = getCharacter()
             task.wait(delay_sell)
             SellRemote:InvokeServer()
@@ -940,102 +946,81 @@ local function processQueue()
     selling = false
 end
 
-local function sellSelectedClasses()
+local function sellExistingByCurrentClass()
+    local state = getgenv().AutoSellState
+    if not (state.Enabled and state.CurrentClass) then return end
+
     for tool, class in pairs(ClassData) do
-        if selectedClasses[class] and tool.Parent == lp.Backpack then
+        if class == state.CurrentClass and tool.Parent == backpack then
             table.insert(queue, tool)
         end
     end
+
     processQueue()
 end
 
-local function scanThenSell()
-    if scanning or selling then return end
-    scanAll()
-    task.wait(delay_sell * 2)
-    sellSelectedClasses()
-end
-
--- ================== WATCH NEW TOOLS ==================
+-- ================== WATCH BACKPACK ==================
 local function connectBackpackWatcher()
     if backpackConn then
         backpackConn:Disconnect()
     end
 
-    local backpack = lp:WaitForChild("Backpack")
     backpackConn = backpack.ChildAdded:Connect(function(tool)
-        if not sellToggleOn then return end
-        if not tool:IsA("Tool") then return end
-
-        task.wait(0.15)
+        task.wait(0.1)
         scanTool(tool)
-
-        local class = ClassData[tool]
-        if class and selectedClasses[class] then
-            table.insert(queue, tool)
-            processQueue()
-        end
+        processQueue()
     end)
 end
 
 -- ================== UI (FarmTab) ==================
 WaveTab:Dropdown({
     Title = "Select Rarity Brainrot",
-    Desc = "เลือกระดับความหายากที่จะขาย",
+    Desc = "เลือกระดับความหายาก",
     Values = {
         "Common","Uncommon","Rare","Epic",
         "Legendary","Mythical","Cosmic",
         "Secret","Celestial","Divine"
     },
-    Multi = true,
+    Multi = false,
     AllowNone = true,
     Callback = function(selected)
-        selectedClasses = {}
-        for _, c in ipairs(selected) do
-            selectedClasses[c] = true
-        end
-
-        -- ถ้า Toggle เปิดอยู่ → เปลี่ยนเงื่อนไขแล้วขายทันที
-        if sellToggleOn then
-            scanThenSell()
-        end
+        getgenv().AutoSellState.CurrentClass = selected
+        -- ถ้า Toggle เปิด → ใช้เงื่อนไขใหม่กับของที่มีอยู่
+        sellExistingByCurrentClass()
     end
 })
 
 WaveTab:Toggle({
     Title = "Auto Sell Brainrot",
-    Desc = "สแกนและขายตามระดับที่เลือก",
-    Default = false,
+    Desc = "ขายตามระดับที่เลือก",
+    Default = getgenv().AutoSellState.Enabled,
     Callback = function(state)
-        sellToggleOn = state
-
+        getgenv().AutoSellState.Enabled = state
         if state then
-            scanThenSell()
-            connectBackpackWatcher()
-        else
-            if backpackConn then
-                backpackConn:Disconnect()
-                backpackConn = nil
-            end
+            sellExistingByCurrentClass()
         end
     end
 })
 
 -- ================== RESPAWN ==================
 lp.CharacterAdded:Connect(function()
-    task.wait(0.6)
-
+    task.wait(0.5)
     Checked = {}
     ClassData = {}
     queue = {}
     scanning = false
     selling = false
 
-    if sellToggleOn then
-        scanThenSell()
-        connectBackpackWatcher()
-    end
+    scanAll()
+    connectBackpackWatcher()
+
+    -- ถ้าเปิดอยู่ → ใช้ข้อมูลเดิมต่อ
+    sellExistingByCurrentClass()
 end)
+
+-- ================== INIT ==================
+scanAll()
+connectBackpackWatcher()
 
 
 
