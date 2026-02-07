@@ -339,3 +339,69 @@ local function CreateDropdown(tab,text,list,callback)
 end
 
 print("PART2 LOADED")
+
+
+--// ===== ADD UI HERE ===== //--
+
+-- tab1 tab2 tab3 มาจาก part1
+
+-- ===== MAIN TAB =====
+CreateButton(tab1,"Test Button",function()
+    print("กดปุ่มแล้ว")
+end)
+
+CreateToggle(tab1,"Auto Farm",false,function(v)
+    print("AutoFarm:",v)
+end)
+
+CreateSlider(tab1,"Speed",0,200,function(v)
+    print("Speed:",v)
+end)
+
+CreateTextbox(tab1,"ใส่ชื่อผู้เล่น",function(text)
+    print("textbox:",text)
+end)
+
+CreateDropdown(tab1,"เลือกแมพ",{
+    "Bloxfruit",
+    "Anime vanguards",
+    "Blade ball",
+    "Grow garden",
+    "Dead rail"
+},function(v)
+    print("เลือก:",v)
+end)
+
+-- ===== FARM TAB =====
+CreateButton(tab2,"Start Farm",function()
+    print("start farm")
+end)
+
+CreateToggle(tab2,"Auto Attack",false,function(v)
+    print("attack:",v)
+end)
+
+CreateSlider(tab2,"Farm Range",0,1000,function(v)
+    print("range:",v)
+end)
+
+-- ===== MISC TAB =====
+CreateButton(tab3,"Rejoin",function()
+    game:GetService("TeleportService"):Teleport(game.PlaceId)
+end)
+
+CreateButton(tab3,"Copy JobId",function()
+    setclipboard(game.JobId)
+end)
+
+CreateToggle(tab3,"FPS Boost",false,function(v)
+    if v then
+        for _,x in pairs(game:GetDescendants()) do
+            if x:IsA("BasePart") then
+                x.Material="Plastic"
+            end
+        end
+    end
+end)
+
+print("UI FULLY LOADED 🔥")
