@@ -165,3 +165,177 @@ local tab2 = CreateTab("Farm")
 local tab3 = CreateTab("Misc")
 
 print("PART1 LOADED")
+
+--// ===== UI ELEMENT SYSTEM ===== //--
+
+local function CreateButton(tab,text,callback)
+    local btn = Instance.new("TextButton", tab)
+    btn.Size = UDim2.new(1,-10,0,35)
+    btn.BackgroundColor3 = Color3.fromRGB(35,35,35)
+    btn.Text = text
+    btn.Font = Enum.Font.GothamBold
+    btn.TextSize = 13
+    btn.TextColor3 = Color3.fromRGB(255,255,255)
+    btn.BorderSizePixel = 0
+    Instance.new("UICorner",btn).CornerRadius=UDim.new(0,8)
+
+    btn.MouseButton1Click:Connect(function()
+        pcall(callback)
+    end)
+end
+
+-- Toggle
+local function CreateToggle(tab,text,default,callback)
+    local state = default
+
+    local frame = Instance.new("Frame",tab)
+    frame.Size = UDim2.new(1,-10,0,35)
+    frame.BackgroundColor3 = Color3.fromRGB(35,35,35)
+    frame.BorderSizePixel=0
+    Instance.new("UICorner",frame).CornerRadius=UDim.new(0,8)
+
+    local label = Instance.new("TextLabel",frame)
+    label.Text=text
+    label.Font=Enum.Font.GothamBold
+    label.TextSize=13
+    label.TextColor3=Color3.fromRGB(255,255,255)
+    label.BackgroundTransparency=1
+    label.Position=UDim2.new(0,10,0,0)
+    label.Size=UDim2.new(1,-60,1,0)
+    label.TextXAlignment="Left"
+
+    local btn = Instance.new("TextButton",frame)
+    btn.Size=UDim2.new(0,50,0,22)
+    btn.Position=UDim2.new(1,-60,0.5,-11)
+    btn.Text= state and "ON" or "OFF"
+    btn.Font=Enum.Font.GothamBold
+    btn.TextSize=12
+    btn.BackgroundColor3 = state and Color3.fromRGB(0,170,0) or Color3.fromRGB(60,60,60)
+    btn.TextColor3=Color3.new(1,1,1)
+    btn.BorderSizePixel=0
+    Instance.new("UICorner",btn).CornerRadius=UDim.new(0,6)
+
+    btn.MouseButton1Click:Connect(function()
+        state=not state
+        btn.Text= state and "ON" or "OFF"
+        btn.BackgroundColor3 = state and Color3.fromRGB(0,170,0) or Color3.fromRGB(60,60,60)
+        pcall(function() callback(state) end)
+    end)
+end
+
+-- Slider
+local function CreateSlider(tab,text,min,max,callback)
+    local frame = Instance.new("Frame",tab)
+    frame.Size=UDim2.new(1,-10,0,50)
+    frame.BackgroundColor3=Color3.fromRGB(35,35,35)
+    frame.BorderSizePixel=0
+    Instance.new("UICorner",frame).CornerRadius=UDim.new(0,8)
+
+    local label = Instance.new("TextLabel",frame)
+    label.Text=text.." : "..min
+    label.Font=Enum.Font.GothamBold
+    label.TextSize=13
+    label.TextColor3=Color3.new(1,1,1)
+    label.BackgroundTransparency=1
+    label.Size=UDim2.new(1,0,0,20)
+
+    local bar = Instance.new("Frame",frame)
+    bar.Size=UDim2.new(1,-20,0,8)
+    bar.Position=UDim2.new(0,10,0,30)
+    bar.BackgroundColor3=Color3.fromRGB(60,60,60)
+    bar.BorderSizePixel=0
+    Instance.new("UICorner",bar).CornerRadius=UDim.new(1,0)
+
+    local fill = Instance.new("Frame",bar)
+    fill.Size=UDim2.new(0,0,1,0)
+    fill.BackgroundColor3=Color3.fromRGB(0,170,255)
+    fill.BorderSizePixel=0
+    Instance.new("UICorner",fill).CornerRadius=UDim.new(1,0)
+
+    local dragging=false
+
+    bar.InputBegan:Connect(function(i)
+        if i.UserInputType==Enum.UserInputType.MouseButton1 then dragging=true end
+    end)
+    game:GetService("UserInputService").InputEnded:Connect(function(i)
+        if i.UserInputType==Enum.UserInputType.MouseButton1 then dragging=false end
+    end)
+
+    game:GetService("UserInputService").InputChanged:Connect(function(i)
+        if dragging and i.UserInputType==Enum.UserInputType.MouseMovement then
+            local pos=(i.Position.X-bar.AbsolutePosition.X)/bar.AbsoluteSize.X
+            pos=math.clamp(pos,0,1)
+            fill.Size=UDim2.new(pos,0,1,0)
+            local val=math.floor((min+(max-min)*pos))
+            label.Text=text.." : "..val
+            pcall(function()callback(val)end)
+        end
+    end)
+end
+
+-- Textbox
+local function CreateTextbox(tab,text,callback)
+    local box = Instance.new("TextBox",tab)
+    box.Size=UDim2.new(1,-10,0,35)
+    box.BackgroundColor3=Color3.fromRGB(35,35,35)
+    box.PlaceholderText=text
+    box.Text=""
+    box.Font=Enum.Font.GothamBold
+    box.TextSize=13
+    box.TextColor3=Color3.new(1,1,1)
+    box.BorderSizePixel=0
+    Instance.new("UICorner",box).CornerRadius=UDim.new(0,8)
+
+    box.FocusLost:Connect(function()
+        pcall(function()callback(box.Text)end)
+    end)
+end
+
+-- Dropdown scroll
+local function CreateDropdown(tab,text,list,callback)
+    local frame=Instance.new("Frame",tab)
+    frame.Size=UDim2.new(1,-10,0,40)
+    frame.BackgroundColor3=Color3.fromRGB(35,35,35)
+    frame.BorderSizePixel=0
+    Instance.new("UICorner",frame).CornerRadius=UDim.new(0,8)
+
+    local btn=Instance.new("TextButton",frame)
+    btn.Size=UDim2.new(1,0,1,0)
+    btn.BackgroundTransparency=1
+    btn.Text=text.." ▼"
+    btn.Font=Enum.Font.GothamBold
+    btn.TextSize=13
+    btn.TextColor3=Color3.new(1,1,1)
+
+    local drop=Instance.new("ScrollingFrame",frame)
+    drop.Position=UDim2.new(0,0,1,0)
+    drop.Size=UDim2.new(1,0,0,120)
+    drop.CanvasSize=UDim2.new(0,0,0,0)
+    drop.Visible=false
+    drop.BackgroundColor3=Color3.fromRGB(25,25,25)
+    drop.BorderSizePixel=0
+    drop.ScrollBarThickness=4
+
+    local lay=Instance.new("UIListLayout",drop)
+
+    btn.MouseButton1Click:Connect(function()
+        drop.Visible=not drop.Visible
+    end)
+
+    for _,v in pairs(list) do
+        local opt=Instance.new("TextButton",drop)
+        opt.Size=UDim2.new(1,0,0,30)
+        opt.Text=v
+        opt.BackgroundColor3=Color3.fromRGB(45,45,45)
+        opt.TextColor3=Color3.new(1,1,1)
+        opt.BorderSizePixel=0
+
+        opt.MouseButton1Click:Connect(function()
+            btn.Text=text..": "..v
+            drop.Visible=false
+            pcall(function()callback(v)end)
+        end)
+    end
+end
+
+print("PART2 LOADED")
