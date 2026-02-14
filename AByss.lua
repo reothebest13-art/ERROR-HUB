@@ -71,23 +71,16 @@ WindUI:AddTheme({
 
 WindUI:SetTheme("RickHUBTheme")
 
---// =========================
---// PLAYER AVATAR
---// =========================
+
 local avatar = "https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds="
 ..player.UserId.."&size=420x420&format=Png"
 
---// =========================
---// WINDOW
---// =========================
 local Window = WindUI:CreateWindow({
     Title = "RICK HUB [ Abyss Beta ]",
-    Icon = "rbxassetid://108455308252343",
-    Author = "009.exe",
+    Icon = "rbxassetid://",
+    Author = "Author[ 009.exe ]",
     Folder = "RICK HUB",
-
-    Size = UDim2.fromOffset(730, 410), -- 📏 ขนาด UI
-
+    Size = UDim2.fromOffset(730, 410),
     Theme = "RickHUBTheme",
     Transparent = true,
     Resizable = true,
@@ -96,15 +89,13 @@ local Window = WindUI:CreateWindow({
         Enabled = true,
         Custom = {
             Name = player.Name,
-            Bio = "ERROR HUB USER",
+            Bio = "RickHUB USER",
             Image = avatar
         }
     }
 })
 
---// =========================
---// TABS
---// =========================
+
 local MainTab   = Window:Tab({Title="Main",   Icon="home"})
 local PlayerTab = Window:Tab({Title="Player", Icon="user"})
 
